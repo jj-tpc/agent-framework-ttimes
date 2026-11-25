@@ -1,0 +1,10 @@
+# 로컬 사용자 데이터(프로젝트·메모리·API 키·토큰)는 올리지 않는다. 공용 파일만 올린다.
+/data/*
+!/data/datasets
+!/data/skills
+!/data/plugins
+.env*
+!.env.example
+/node_modules
+/.next
+*.tsbuildinfo

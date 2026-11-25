@@ -1,0 +1,421 @@
+app:
+  name: 기억하는 비서 (메모리 모듈)
+  description: LLM 노드에 메모리 모듈(고정 프로필)을 붙인 데모. 대화를 새로 시작해도 사용자에 대해 알게 된 것을 기억합니다.
+  icon: 🧠
+  mode: advanced-chat
+  icon_background: '#FCE7F3'
+kind: app
+version: 0.1.5
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    opening_statement: >-
+      LLM 노드 아래에 ‘고정 프로필’ 메모리 모듈이 붙어 있습니다. 자기소개를 한 뒤 ‘대화 초기화’를 누르고 다시 물어보세요. 모듈을
+      눌러 종류를 바꾸면 다른 메모리 구현(사실 추출, 에피소드, 파일, 그래프, 백그라운드 통합…)을 같은 자리에서 비교할 수 있습니다.
+    suggested_questions:
+      - 저는 부산에 사는 채식주의자 개발자 김하늘이에요
+      - 주말 저녁에 갈 만한 식당 추천해 주세요
+      - 참, 저 다음 달에 서울로 이사해요
+      - 저에 대해 뭘 알고 있어요?
+  graph:
+    nodes:
+      - id: memory
+        type: custom-block
+        position:
+          x: 120
+          'y': 420
+        width: 1544
+        height: 412
+        data:
+          type: block
+          title: 메모리 · 고정 프로필
+          desc: 크기 제한이 있는 프로필 문서를 항상 주입
+          color: '#dbeafe'
+          memory:
+            kind: profile
+            store: profile
+            context:
+              - memory_r2
+              - output
+            history: []
+            split: 228
+      - id: start
+        type: custom
+        position:
+          x: 0
+          'y': 200
+        data:
+          type: start
+          title: 시작
+          variables: []
+      - id: llm
+        type: custom
+        position:
+          x: 320
+          'y': 200
+        data:
+          type: llm
+          title: LLM
+          model:
+            provider: anthropic
+            name: claude-opus-5-5
+            mode: chat
+            completion_params:
+              max_tokens: 16000
+              effort: medium
+              thinking_display: summarized
+          prompt_template:
+            - role: system
+              text: >-
+                너는 사용자를 오래 알아 온 개인 비서다. [메모리]에 있는 내용은 이미 알고 있는 사실로 자연스럽게 활용하되,
+                없는 내용을 아는 척하지 않는다. 한국어로 간결하게 답한다.
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          memory:
+            window:
+              enabled: true
+              size: 4
+            query_prompt_template: '{{#sys.query#}}'
+      - id: answer
+        type: custom
+        position:
+          x: 640
+          'y': 200
+        data:
+          type: answer
+          title: 답변
+          answer: '{{#llm.text#}}'
+      - id: memory_r1
+        type: custom
+        parentId: memory
+        position:
+          x: 104
+          'y': 78
+        data:
+          type: memory-store
+          title: 프로필 읽기
+          desc: 항상 통째로 읽는다
+          op: doc_get
+          key: profile
+          value: ''
+          query: ''
+          top_k: 5
+          valid_only: true
+          include_unmatched: false
+          list: []
+          importance: ''
+          store: ''
+      - id: memory_r2
+        type: custom
+        parentId: memory
+        position:
+          x: 380
+          'y': 78
+        data:
+          type: template-transform
+          title: 프로필 주입문
+          desc: ''
+          variables:
+            - variable: profile
+              value_selector:
+                - memory_r1
+                - text
+          template: |-
+            {% if profile %}사용자에 대해 알고 있는 것 (항상 참고):
+            {{ profile }}{% endif %}
+      - id: memory_w1
+        type: custom
+        parentId: memory
+        position:
+          x: 104
+          'y': 262
+        data:
+          type: memory-store
+          title: 프로필 읽기
+          desc: ''
+          op: doc_get
+          key: profile
+          value: ''
+          query: ''
+          top_k: 5
+          valid_only: true
+          include_unmatched: false
+          list: []
+          importance: ''
+          store: ''
+      - id: memory_w2
+        type: custom
+        parentId: memory
+        position:
+          x: 380
+          'y': 262
+        data:
+          type: llm
+          title: 프로필 갱신 판단
+          desc: 이번 턴에서 프로필을 고칠 것이 있는지
+          model:
+            provider: anthropic
+            name: claude-opus-5-5
+            mode: chat
+            completion_params:
+              max_tokens: 4000
+              effort: low
+              thinking_display: summarized
+          prompt_template:
+            - role: system
+              text: >-
+                너는 사용자 프로필 관리자다. 이번 대화에서 앞으로도 계속 유효한 사용자 정보(이름, 직업, 선호, 진행 중인 일,
+                부탁한 응대 방식)만 골라 프로필을 고친다.
+
+                일회성 질문, 잡담, AI 답변의 내용은 넣지 않는다. 고칠 것이 없으면 ops 를 빈 배열로 둔다.
+
+                - add: text 를 새 줄로 추가 (old 는 빈 문자열)
+
+                - replace: 현재 프로필의 old 줄을 text 로 교체
+
+                - remove: 현재 프로필의 old 줄을 삭제 (text 는 빈 문자열)
+
+                old 에는 현재 프로필의 줄을 그대로 적는다.
+            - role: user
+              text: |-
+                현재 프로필:
+                {{#memory_w1.text#}}
+
+                이번 대화:
+                사용자: {{#memory.query#}}
+                AI: {{#memory.answer#}}
+          context:
+            enabled: false
+            variable_selector: []
+          vision:
+            enabled: false
+          structured_output_enabled: true
+          structured_output:
+            schema:
+              type: object
+              properties:
+                ops:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      op:
+                        type: string
+                        enum:
+                          - add
+                          - replace
+                          - remove
+                      old:
+                        type: string
+                        description: 고치거나 지울 기존 줄
+                      text:
+                        type: string
+                        description: 새 내용
+                    required:
+                      - op
+                      - old
+                      - text
+                    additionalProperties: false
+              required:
+                - ops
+              additionalProperties: false
+      - id: memory_w3
+        type: custom
+        parentId: memory
+        position:
+          x: 656
+          'y': 262
+        data:
+          type: code
+          title: 프로필에 적용 · 크기 제한
+          desc: 한도를 넘으면 오래된 줄부터 버린다
+          code_language: javascript
+          variables:
+            - variable: profile
+              value_selector:
+                - memory_w1
+                - text
+            - variable: result
+              value_selector:
+                - memory_w2
+                - structured_output
+          code: |-
+            // 프로필은 매 턴 통째로 프롬프트에 들어가므로 크기를 묶어 둔다
+            const MAX_CHARS = 1500;
+
+            function main({ profile, result }) {
+              const clean = (s) => String(s || "").replace(/^[-•]\s*/, "").trim();
+              const lines = String(profile || "").split("\n").map((s) => s.trim()).filter(Boolean);
+              const log = [];
+              for (const o of (result && result.ops) || []) {
+                const text = clean(o.text);
+                const i = lines.findIndex((l) => clean(l) === clean(o.old));
+                if (o.op === "add" && text && !lines.some((l) => clean(l) === text)) {
+                  lines.push("- " + text);
+                  log.push("추가: " + text);
+                } else if (o.op === "replace" && i >= 0 && text) {
+                  log.push("교체: " + clean(lines[i]) + " → " + text);
+                  lines[i] = "- " + text;
+                } else if (o.op === "remove" && i >= 0) {
+                  log.push("삭제: " + clean(lines.splice(i, 1)[0]));
+                }
+              }
+              while (lines.join("\n").length > MAX_CHARS && lines.length > 1) log.push("한도 초과로 삭제: " + clean(lines.shift()));
+              return { profile: lines.join("\n"), changed: log.length > 0, log };
+            }
+          outputs:
+            profile:
+              type: string
+              children: null
+            changed:
+              type: boolean
+              children: null
+            log:
+              type: array[string]
+              children: null
+      - id: memory_w4
+        type: custom
+        parentId: memory
+        position:
+          x: 932
+          'y': 262
+        data:
+          type: if-else
+          title: 바뀌었나?
+          desc: ''
+          cases:
+            - case_id: 'true'
+              logical_operator: and
+              conditions:
+                - variable_selector:
+                    - memory_w3
+                    - changed
+                  comparison_operator: is
+                  value: 'true'
+      - id: memory_w5
+        type: custom
+        parentId: memory
+        position:
+          x: 1208
+          'y': 262
+        data:
+          type: memory-store
+          title: 프로필 저장
+          desc: ''
+          op: doc_set
+          key: profile
+          value: '{{#memory_w3.profile#}}'
+          query: ''
+          top_k: 5
+          valid_only: true
+          include_unmatched: false
+          list: []
+          importance: ''
+          store: ''
+    edges:
+      - id: start-source-llm
+        source: start
+        sourceHandle: source
+        target: llm
+        targetHandle: target
+        type: custom
+      - id: llm-source-answer
+        source: llm
+        sourceHandle: source
+        target: answer
+        targetHandle: target
+        type: custom
+      - id: memory-read-memory_r1
+        source: memory
+        sourceHandle: read
+        target: memory_r1
+        targetHandle: target
+        type: custom
+        data:
+          sourceType: block
+          targetType: memory-store
+      - id: memory_r1-source-memory_r2
+        source: memory_r1
+        sourceHandle: source
+        target: memory_r2
+        targetHandle: target
+        type: custom
+        data:
+          sourceType: memory-store
+          targetType: template-transform
+      - id: memory_r2-source-memory-read-end
+        source: memory_r2
+        sourceHandle: source
+        target: memory
+        targetHandle: read-end
+        type: custom
+        data:
+          sourceType: template-transform
+          targetType: block
+      - id: memory-write-memory_w1
+        source: memory
+        sourceHandle: write
+        target: memory_w1
+        targetHandle: target
+        type: custom
+        data:
+          sourceType: block
+          targetType: memory-store
+      - id: memory_w1-source-memory_w2
+        source: memory_w1
+        sourceHandle: source
+        target: memory_w2
+        targetHandle: target
+        type: custom
+        data:
+          sourceType: memory-store
+          targetType: llm
+      - id: memory_w2-source-memory_w3
+        source: memory_w2
+        sourceHandle: source
+        target: memory_w3
+        targetHandle: target
+        type: custom
+        data:
+          sourceType: llm
+          targetType: code
+      - id: memory_w3-source-memory_w4
+        source: memory_w3
+        sourceHandle: source
+        target: memory_w4
+        targetHandle: target
+        type: custom
+        data:
+          sourceType: code
+          targetType: if-else
+      - id: memory_w4-true-memory_w5
+        source: memory_w4
+        sourceHandle: 'true'
+        target: memory_w5
+        targetHandle: target
+        type: custom
+        data:
+          sourceType: if-else
+          targetType: memory-store
+      - id: memory_w5-source-memory-write-end
+        source: memory_w5
+        sourceHandle: source
+        target: memory
+        targetHandle: write-end
+        type: custom
+        data:
+          sourceType: memory-store
+          targetType: block
+      - id: memory-memory-llm-memory
+        source: memory
+        sourceHandle: memory
+        target: llm
+        targetHandle: memory
+        type: custom
+        data:
+          sourceType: block
+          targetType: llm

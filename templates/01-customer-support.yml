@@ -1,0 +1,290 @@
+app:
+  description: 질문을 분류해 FAQ 검색(RAG), 환불 판정(파라미터 추출 → 조건 분기 → '환불 판정' 블록), 잡담 응대(GPT)로 나누는 고객지원 챗플로
+  icon: 🎧
+  icon_background: '#E0F2FE'
+  mode: advanced-chat
+  name: 고객지원 에이전트 (Acme)
+kind: app
+version: 0.1.5
+workflow:
+  conversation_variables: []
+  environment_variables:
+    - name: brand
+      value: Acme 스마트노트
+      value_type: string
+  features:
+    opening_statement: 안녕하세요, Acme 스마트노트 고객지원입니다. 질문을 보내면 각 노드가 어떤 입력을 받아 어떤 결과를 냈는지 오른쪽에서 확인할 수 있어요.
+    suggested_questions:
+      - 프로 요금제 가격이랑 오프라인 기능 알려줘
+      - 동기화가 안 돼요. 세 번째 기기에서 노트가 안 보여요
+      - 환불 요청합니다. 주문번호 AC-20261110-0042 인데 기능이 기대와 달라요
+      - 결제 취소하고 싶어요
+      - 안녕! 오늘 날씨 좋네
+  graph:
+    edges:
+      - { id: e-start-classifier, source: start, sourceHandle: source, target: classifier, targetHandle: target, type: custom }
+      - { id: e-classifier-kb, source: classifier, sourceHandle: '1', target: kb, targetHandle: target, type: custom }
+      - { id: e-kb-llm_rag, source: kb, sourceHandle: source, target: llm_rag, targetHandle: target, type: custom }
+      - { id: e-llm_rag-answer_rag, source: llm_rag, sourceHandle: source, target: answer_rag, targetHandle: target, type: custom }
+      - { id: e-classifier-extractor, source: classifier, sourceHandle: '2', target: extractor, targetHandle: target, type: custom }
+      - { id: e-extractor-has_order, source: extractor, sourceHandle: source, target: has_order, targetHandle: target, type: custom }
+      - { id: e-has_order-refund_block, source: has_order, sourceHandle: 'true', target: refund_block, targetHandle: target, type: custom }
+      - { id: e-refund_block-entry-refund_calc, source: refund_block, sourceHandle: entry, target: refund_calc, targetHandle: target, type: custom }
+      - { id: e-refund_calc-refund_tpl, source: refund_calc, sourceHandle: source, target: refund_tpl, targetHandle: target, type: custom }
+      - { id: e-refund_tpl-llm_refund, source: refund_tpl, sourceHandle: source, target: llm_refund, targetHandle: target, type: custom }
+      - { id: e-llm_refund-refund_block-exit, source: llm_refund, sourceHandle: source, target: refund_block, targetHandle: exit, type: custom }
+      - { id: e-refund_block-answer_refund, source: refund_block, sourceHandle: source, target: answer_refund, targetHandle: target, type: custom }
+      - { id: e-has_order-answer_ask, source: has_order, sourceHandle: 'false', target: answer_ask, targetHandle: target, type: custom }
+      - { id: e-classifier-llm_chat, source: classifier, sourceHandle: '3', target: llm_chat, targetHandle: target, type: custom }
+      - { id: e-llm_chat-answer_chat, source: llm_chat, sourceHandle: source, target: answer_chat, targetHandle: target, type: custom }
+    nodes:
+      - id: start
+        type: custom
+        position: { x: 0, y: 330 }
+        data:
+          type: start
+          title: 시작
+          desc: 사용자 질문(sys.query)과 고객 등급을 받는다
+          variables:
+            - variable: customer_tier
+              label: 고객 등급
+              type: select
+              options: [일반, VIP]
+              default: 일반
+              required: false
+
+      - id: classifier
+        type: custom
+        position: { x: 300, y: 330 }
+        data:
+          type: question-classifier
+          title: 질문 분류
+          desc: 문의 유형에 따라 세 갈래로 분기
+          query_variable_selector: [sys, query]
+          model: { provider: anthropic, name: claude-opus-5-5, mode: chat, completion_params: { max_tokens: 4000, effort: low, thinking_display: summarized } }
+          classes:
+            - { id: '1', name: 제품 사용법·기능·요금제 문의 }
+            - { id: '2', name: 환불·결제·주문 문제 }
+            - { id: '3', name: 인사·잡담 등 기타 }
+          instruction: '{{#env.brand#}} 고객센터로 들어온 메시지다. 환불이라는 단어가 없어도 결제 취소·주문 문제면 2번으로 분류한다.'
+
+      - id: kb
+        type: custom
+        position: { x: 640, y: 60 }
+        data:
+          type: knowledge-retrieval
+          title: FAQ 검색
+          desc: 로컬 지식베이스(acme-faq)에서 관련 문단 검색
+          query_variable_selector: [sys, query]
+          dataset_ids: [acme-faq]
+          retrieval_mode: multiple
+          multiple_retrieval_config: { top_k: 3, score_threshold: null }
+
+      - id: llm_rag
+        type: custom
+        position: { x: 960, y: 60 }
+        data:
+          type: llm
+          title: FAQ 기반 답변
+          model:
+            provider: anthropic
+            name: claude-opus-5-5
+            mode: chat
+            completion_params: { max_tokens: 16000, effort: medium, thinking_display: summarized }
+          context:
+            enabled: true
+            variable_selector: [kb, result]
+          prompt_template:
+            - role: system
+              text: |-
+                너는 {{#env.brand#}} 고객지원 상담원이다.
+                아래 <context> 안의 FAQ만 근거로 답하고, 근거가 없으면 모른다고 말한 뒤 support@acme.example 로 안내한다.
+                고객 등급: {{#start.customer_tier#}} (VIP면 전담 매니저 연결도 제안)
+                답변은 한국어 3~6문장, 필요하면 단계별 목록을 쓴다.
+
+                <context>
+                {{#context#}}
+                </context>
+          memory:
+            window: { enabled: true, size: 6 }
+            query_prompt_template: '{{#sys.query#}}'
+          vision: { enabled: false }
+
+      - id: answer_rag
+        type: custom
+        position: { x: 1280, y: 60 }
+        data:
+          type: answer
+          title: 답변 (FAQ)
+          answer: '{{#llm_rag.text#}}'
+
+      - id: extractor
+        type: custom
+        position: { x: 640, y: 330 }
+        data:
+          type: parameter-extractor
+          title: 주문 정보 추출
+          desc: 메시지에서 주문번호와 사유를 구조화
+          query: [sys, query]
+          model: { provider: anthropic, name: claude-opus-5-5, mode: chat, completion_params: { max_tokens: 4000, effort: low, thinking_display: summarized } }
+          reasoning_mode: prompt
+          instruction: 주문번호 형식은 AC-YYYYMMDD-NNNN 이다. 형식이 조금 달라도 주문번호로 보이면 그대로 옮긴다.
+          parameters:
+            - name: order_id
+              type: string
+              description: 주문번호 (예 AC-20261110-0042). 메시지에 없으면 null
+              required: false
+            - name: reason
+              type: string
+              description: 고객이 말한 환불·문제 사유를 한 문장으로 요약
+              required: false
+
+      - id: has_order
+        type: custom
+        position: { x: 960, y: 330 }
+        data:
+          type: if-else
+          title: 주문번호 있음?
+          cases:
+            - case_id: 'true'
+              logical_operator: and
+              conditions:
+                - variable_selector: [extractor, order_id]
+                  comparison_operator: not empty
+                  value: ''
+
+      - id: refund_block
+        type: custom-block
+        position: { x: 1196, y: 186 }
+        width: 1044
+        height: 240
+        data:
+          type: block
+          title: 환불 판정
+          desc: 규정 계산 → 판정서 → 안내문 작성
+          color: '#ffedd5'
+
+      - id: refund_calc
+        type: custom
+        parentId: refund_block
+        position: { x: 84, y: 74 }
+        data:
+          type: code
+          title: 환불 규정 계산
+          desc: 주문번호의 날짜로 경과일을 계산해 규정 적용
+          code_language: javascript
+          variables:
+            - { variable: order_id, value_selector: [extractor, order_id] }
+            - { variable: tier, value_selector: [start, customer_tier] }
+          code: |-
+            function main({ order_id, tier }) {
+              const limit = tier === "VIP" ? 30 : 14;
+              const m = String(order_id || "").match(/(\d{4})(\d{2})(\d{2})/);
+              if (!m) {
+                return { eligible: false, days_since_order: -1, limit_days: limit, policy: "주문번호에서 주문일을 읽지 못함" };
+              }
+              const ordered = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+              const days = Math.floor((Date.now() - ordered.getTime()) / 86400000);
+              const eligible = days >= 0 && days <= limit;
+              console.log(`주문일 ${m[1]}-${m[2]}-${m[3]}, 경과 ${days}일, 기준 ${limit}일`);
+              return {
+                eligible,
+                days_since_order: days,
+                limit_days: limit,
+                policy: eligible ? `구매 후 ${limit}일 이내 → 전액 환불` : `구매 후 ${limit}일 초과 → 스토어 크레딧으로만 환불`,
+              };
+            }
+          outputs:
+            eligible: { type: boolean, children: null }
+            days_since_order: { type: number, children: null }
+            limit_days: { type: number, children: null }
+            policy: { type: string, children: null }
+
+      - id: refund_tpl
+        type: custom
+        parentId: refund_block
+        position: { x: 404, y: 74 }
+        data:
+          type: template-transform
+          title: 판정서 작성
+          variables:
+            - { variable: order_id, value_selector: [extractor, order_id] }
+            - { variable: reason, value_selector: [extractor, reason] }
+            - { variable: tier, value_selector: [start, customer_tier] }
+            - { variable: eligible, value_selector: [refund_calc, eligible] }
+            - { variable: days, value_selector: [refund_calc, days_since_order] }
+            - { variable: limit, value_selector: [refund_calc, limit_days] }
+            - { variable: policy, value_selector: [refund_calc, policy] }
+          template: |-
+            [환불 판정서]
+            - 주문번호: {{ order_id }}
+            - 고객 등급: {{ tier }}
+            - 사유: {{ reason or "미기재" }}
+            - 경과일: {{ days }}일 (기준 {{ limit }}일)
+            - 판정: {% if eligible %}전액 환불 가능{% else %}전액 환불 불가{% endif %}
+            - 적용 규정: {{ policy }}
+
+      - id: llm_refund
+        type: custom
+        parentId: refund_block
+        position: { x: 724, y: 74 }
+        data:
+          type: llm
+          title: 환불 안내문 작성
+          model:
+            provider: anthropic
+            name: claude-opus-5-5
+            mode: chat
+            completion_params: { max_tokens: 8000, effort: low, thinking_display: summarized }
+          prompt_template:
+            - role: system
+              text: |-
+                너는 {{#env.brand#}} 결제 담당 상담원이다. 판정서 내용을 바꾸지 말고, 고객에게 결과와 다음 절차를 정중하게 안내한다.
+                전액 환불이 불가하면 대안(스토어 크레딧)을 제시한다. 4문장 이내.
+            - role: user
+              text: |-
+                {{#refund_tpl.output#}}
+
+                고객 원문: {{#sys.query#}}
+
+      - id: answer_refund
+        type: custom
+        position: { x: 2330, y: 260 }
+        data:
+          type: answer
+          title: 답변 (환불)
+          answer: '{{#llm_refund.text#}}'
+
+      - id: answer_ask
+        type: custom
+        position: { x: 1280, y: 480 }
+        data:
+          type: answer
+          title: 주문번호 요청
+          answer: '환불을 도와드릴게요. 주문번호(예: AC-20261110-0042)를 알려주시면 바로 확인하겠습니다. (파악한 사유: {{#extractor.reason#}})'
+
+      - id: llm_chat
+        type: custom
+        position: { x: 640, y: 600 }
+        data:
+          type: llm
+          title: 잡담 응대
+          model:
+            provider: openai
+            name: gpt-6-luna
+            mode: chat
+            completion_params: { max_output_tokens: 25000, reasoning_effort: none, verbosity: low }
+          prompt_template:
+            - role: system
+              text: 너는 {{#env.brand#}}의 친근한 고객지원 봇이다. 두 문장 이내로 짧게 답하고, 제품 관련 도움이 필요하면 언제든 물어보라고 덧붙인다.
+          memory:
+            window: { enabled: true, size: 4 }
+            query_prompt_template: '{{#sys.query#}}'
+
+      - id: answer_chat
+        type: custom
+        position: { x: 960, y: 600 }
+        data:
+          type: answer
+          title: 답변 (잡담)
+          answer: '{{#llm_chat.text#}}'

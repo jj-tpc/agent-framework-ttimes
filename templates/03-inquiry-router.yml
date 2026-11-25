@@ -1,0 +1,143 @@
+app:
+  description: 분기 노드의 세 가지 방식(텍스트 포함 → 코드 → AI 판단)을 차례로 거치며 문의를 나누는 데모
+  icon: 🔀
+  icon_background: '#FFEDD5'
+  mode: advanced-chat
+  name: 문의 라우터 (분기 3종)
+kind: app
+version: 0.1.5
+workflow:
+  conversation_variables: []
+  environment_variables: []
+  features:
+    opening_statement: 분기 노드 세 가지를 차례로 거칩니다. ① 긴급 문구가 있으면 바로 긴급 접수, ② 코드로 주문번호·짧은 인사를 가려내고, ③ 나머지는 AI가 문의 유형을 판단합니다. 각 분기 노드의 실행 기록에서 왜 그 분기로 갔는지 확인해 보세요.
+    suggested_questions:
+      - 결제가 안 돼요, 긴급합니다
+      - 주문번호 AC-20261110-0042 배송 언제 와요?
+      - 안녕
+      - 프로 요금제랑 팀 요금제 차이가 뭐예요?
+      - 노트를 PDF로 내보내는 방법 알려주세요
+      - 새로 바뀐 디자인 정말 마음에 들어요
+  graph:
+    edges:
+      - { id: e-start-sw_text, source: start, sourceHandle: source, target: sw_text, targetHandle: target, type: custom }
+      - { id: e-sw_text-urgent, source: sw_text, sourceHandle: urgent, target: ans_urgent, targetHandle: target, type: custom }
+      - { id: e-sw_text-else, source: sw_text, sourceHandle: else, target: sw_code, targetHandle: target, type: custom }
+      - { id: e-sw_code-order, source: sw_code, sourceHandle: order, target: ans_order, targetHandle: target, type: custom }
+      - { id: e-sw_code-short, source: sw_code, sourceHandle: short, target: ans_short, targetHandle: target, type: custom }
+      - { id: e-sw_code-else, source: sw_code, sourceHandle: else, target: sw_ai, targetHandle: target, type: custom }
+      - { id: e-sw_ai-billing, source: sw_ai, sourceHandle: billing, target: ans_ai, targetHandle: target, type: custom }
+      - { id: e-sw_ai-howto, source: sw_ai, sourceHandle: howto, target: ans_ai, targetHandle: target, type: custom }
+      - { id: e-sw_ai-feedback, source: sw_ai, sourceHandle: feedback, target: ans_ai, targetHandle: target, type: custom }
+      - { id: e-sw_ai-else, source: sw_ai, sourceHandle: else, target: ans_ai, targetHandle: target, type: custom }
+    nodes:
+      - id: start
+        type: custom
+        position: { x: 0, y: 260 }
+        data:
+          type: start
+          title: 시작
+          variables: []
+
+      - id: sw_text
+        type: custom
+        position: { x: 300, y: 240 }
+        data:
+          type: switch
+          title: ① 긴급 문구 검사
+          desc: ''
+          mode: text
+          input: [sys, query]
+          case_sensitive: false
+          branches:
+            - { id: urgent, name: 긴급, operator: contains_any, keywords: [긴급, 장애, 먹통, 급해, 급합니다], description: '' }
+          else_name: 일반
+          code_language: javascript
+          code: ''
+          variables: []
+          instruction: ''
+
+      - id: ans_urgent
+        type: custom
+        position: { x: 620, y: 60 }
+        data:
+          type: answer
+          title: 긴급 접수
+          answer: '🚨 긴급 문의로 접수했습니다. 담당자가 바로 연락드릴게요. (판단 근거: {{#sw_text.reason#}})'
+
+      - id: sw_code
+        type: custom
+        position: { x: 620, y: 300 }
+        data:
+          type: switch
+          title: ② 주문번호·짧은 인사 (코드)
+          desc: ''
+          mode: code
+          input: [sys, query]
+          branches:
+            - { id: order, name: 주문 문의, operator: contains_any, keywords: [], description: '' }
+            - { id: short, name: 짧은 인사, operator: contains_any, keywords: [], description: '' }
+          else_name: 그 외
+          code_language: javascript
+          code: |-
+            function main({ text }) {
+              // 주문번호 형식(AC-YYYYMMDD-NNNN)이 있으면 주문 문의
+              const order = text.match(/AC-\d{8}-\d{4}/);
+              if (order) return { branch: "주문 문의", reason: `주문번호 ${order[0]} 발견` };
+              // 10자 이하의 짧은 메시지는 인사로 본다
+              const len = text.trim().length;
+              if (len <= 10) return { branch: "짧은 인사", reason: `${len}자 짧은 메시지` };
+              return null; // → 그 외 (AI 판단으로)
+            }
+          variables: []
+          instruction: ''
+
+      - id: ans_order
+        type: custom
+        position: { x: 960, y: 180 }
+        data:
+          type: answer
+          title: 주문 조회 안내
+          answer: '주문 문의로 확인했습니다({{#sw_code.reason#}}). 주문 상태를 조회해 바로 알려드릴게요.'
+
+      - id: ans_short
+        type: custom
+        position: { x: 960, y: 360 }
+        data:
+          type: answer
+          title: 인사 응답
+          answer: 안녕하세요! 무엇을 도와드릴까요? 요금, 기능 사용법, 주문 무엇이든 물어보세요.
+
+      - id: sw_ai
+        type: custom
+        position: { x: 960, y: 540 }
+        data:
+          type: switch
+          title: ③ 문의 유형 (AI 판단)
+          desc: ''
+          mode: ai
+          input: [sys, query]
+          branches:
+            - { id: billing, name: 요금·결제, operator: contains_any, keywords: [], description: '요금제, 가격, 결제 수단, 영수증, 환불 관련 질문' }
+            - { id: howto, name: 기능 사용법, operator: contains_any, keywords: [], description: '앱 기능을 어떻게 쓰는지, 설정·내보내기·동기화 방법을 묻는 질문' }
+            - { id: feedback, name: 의견·불만, operator: contains_any, keywords: [], description: '칭찬, 불만, 기능 제안 같은 의견' }
+          else_name: 기타
+          code_language: javascript
+          code: ''
+          variables: []
+          model:
+            provider: openai
+            name: gpt-6-luna
+            mode: chat
+            completion_params: { max_output_tokens: 25000, reasoning_effort: low }
+          instruction: ''
+
+      - id: ans_ai
+        type: custom
+        position: { x: 1320, y: 560 }
+        data:
+          type: answer
+          title: 유형별 안내
+          answer: |-
+            문의 유형을 **{{#sw_ai.branch#}}**(으)로 판단했습니다.
+            근거: {{#sw_ai.reason#}}

@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+@theme {
+  --color-paper: #f7f7f5;
+  --color-paper-2: #f0efec;
+  --color-surface: #ffffff;
+  --color-ink: #1c1c1f;
+  --color-ink-2: #3f3f46;
+  --color-ink-3: #6f6f78;
+  --color-ink-4: #74747d;
+  --color-line: #e8e6e1;
+  --color-line-2: #d4d2cc;
+  --color-accent: #4f46e5;
+  --color-run: #2563eb;
+  --color-ok: #15803d;
+  --color-err: #c21d1d;
+  --color-warn: #a34a06;
+
+  --font-sans: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SFMono-Regular", Consolas, monospace;
+}
+
+html,
+body {
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* React Flow 기본 스타일 조정 */
+.react-flow__node {
+  cursor: pointer;
+}
+.react-flow__controls {
+  box-shadow: none;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.react-flow__controls-button {
+  border-bottom-color: var(--color-line);
+}
+.react-flow__edge.animated path {
+  stroke-dasharray: 6 4;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+}
+
+/* 키보드 초점: 마우스로 누를 때는 안 보이고 Tab 으로 옮길 때만 보인다 */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-offset: 0;
+}
+[role="dialog"]:focus-visible {
+  outline: none;
+}
+.react-flow__node:focus-visible,
+.react-flow__edge:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+  border-radius: 12px;
+}
+
+input,
+textarea {
+  caret-color: var(--color-accent);
+}
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line-2) transparent;
+}

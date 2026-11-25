@@ -1,0 +1,150 @@
+app:
+  description: 글을 정리(Python)한 뒤 요약(Claude)·키워드(Gemini)를 병렬로 뽑고, 번역(GPT)을 거쳐 하나의 답변으로 합치는 3사 모델 파이프라인
+  icon: 📰
+  icon_background: '#FEF3C7'
+  mode: advanced-chat
+  name: 기사 요약·번역 파이프라인
+kind: app
+version: 0.1.5
+workflow:
+  conversation_variables:
+    - name: digest_count
+      value: 0
+      value_type: number
+  environment_variables:
+    - name: target_lang
+      value: English
+      value_type: string
+  features:
+    opening_statement: 기사나 긴 글을 붙여 넣으면 정리 → 요약·키워드(병렬) → 번역 → 조립 과정을 노드별로 보여줍니다.
+    suggested_questions:
+      - 인공지능 반도체 시장이 빠르게 성장하고 있다. 올해 세계 시장 규모는 전년보다 40% 늘어난 것으로 집계됐다. 주요 기업들은 생산 능력을 확대하고, 각국 정부도 보조금 경쟁에 나섰다. 다만 전력 소비와 공급망 병목이 성장의 걸림돌로 꼽힌다.
+  graph:
+    edges:
+      - { id: e1, source: start, sourceHandle: source, target: clean, targetHandle: target, type: custom }
+      - { id: e2, source: clean, sourceHandle: source, target: llm_summary, targetHandle: target, type: custom }
+      - { id: e3, source: clean, sourceHandle: source, target: llm_keywords, targetHandle: target, type: custom }
+      - { id: e4, source: llm_summary, sourceHandle: source, target: tpl, targetHandle: target, type: custom }
+      - { id: e5, source: llm_keywords, sourceHandle: source, target: tpl, targetHandle: target, type: custom }
+      - { id: e6, source: llm_summary, sourceHandle: source, target: llm_translate, targetHandle: target, type: custom }
+      - { id: e7, source: tpl, sourceHandle: source, target: answer, targetHandle: target, type: custom }
+      - { id: e8, source: llm_translate, sourceHandle: source, target: answer, targetHandle: target, type: custom }
+      - { id: e9, source: answer, sourceHandle: source, target: count, targetHandle: target, type: custom }
+    nodes:
+      - id: start
+        type: custom
+        position: { x: 0, y: 200 }
+        data:
+          type: start
+          title: 시작
+          desc: 채팅 입력(sys.query)으로 기사 본문을 받는다
+          variables: []
+
+      - id: clean
+        type: custom
+        position: { x: 300, y: 200 }
+        data:
+          type: code
+          title: 본문 정리 (Python)
+          desc: 공백 정리, 글자 수·문장 수 계산
+          code_language: python3
+          variables:
+            - { variable: raw, value_selector: [sys, query] }
+          code: |-
+            import re
+
+            def main(raw: str) -> dict:
+                text = re.sub(r"\s+", " ", raw or "").strip()
+                sentences = [s for s in re.split(r"(?<=[.!?。])\s+|(?<=다\.)\s*", text) if s.strip()]
+                print(f"원문 {len(raw or '')}자 → 정리 후 {len(text)}자")
+                return {
+                    "text": text,
+                    "char_count": len(text),
+                    "sentence_count": len(sentences),
+                }
+          outputs:
+            text: { type: string, children: null }
+            char_count: { type: number, children: null }
+            sentence_count: { type: number, children: null }
+
+      - id: llm_summary
+        type: custom
+        position: { x: 620, y: 60 }
+        data:
+          type: llm
+          title: 3줄 요약
+          model: { provider: anthropic, name: claude-opus-5-5, mode: chat, completion_params: { max_tokens: 8000, effort: low, thinking_display: summarized } }
+          prompt_template:
+            - role: system
+              text: 너는 신문사 데스크다. 사실만 남겨 한국어 3줄(각 줄 '- '로 시작)로 요약한다.
+            - role: user
+              text: |-
+                [본문 · {{#clean.char_count#}}자 / {{#clean.sentence_count#}}문장]
+                {{#clean.text#}}
+
+      - id: llm_keywords
+        type: custom
+        position: { x: 620, y: 340 }
+        data:
+          type: llm
+          title: 키워드 추출
+          model: { provider: google, name: gemini-3.5-flash-lite, mode: chat, completion_params: { thinking_level: minimal, include_thoughts: true } }
+          prompt_template:
+            - role: system
+              text: 본문에서 핵심 키워드 5개를 쉼표로 구분해 한 줄로만 출력한다. 다른 말은 쓰지 않는다.
+            - role: user
+              text: '{{#clean.text#}}'
+
+      - id: llm_translate
+        type: custom
+        position: { x: 940, y: 60 }
+        data:
+          type: llm
+          title: 요약 번역
+          model: { provider: openai, name: gpt-6-luna, mode: chat, completion_params: { max_output_tokens: 25000, reasoning_effort: low } }
+          prompt_template:
+            - role: system
+              text: Translate the user's text into {{#env.target_lang#}}. Keep the bullet format. Output only the translation.
+            - role: user
+              text: '{{#llm_summary.text#}}'
+
+      - id: tpl
+        type: custom
+        position: { x: 940, y: 340 }
+        data:
+          type: template-transform
+          title: 결과 조립
+          variables:
+            - { variable: summary, value_selector: [llm_summary, text] }
+            - { variable: keywords, value_selector: [llm_keywords, text] }
+            - { variable: chars, value_selector: [clean, char_count] }
+          template: |-
+            **요약** ({{ chars }}자 기사)
+            {{ summary }}
+
+            **키워드**: {{ keywords }}
+
+      - id: answer
+        type: custom
+        position: { x: 1260, y: 200 }
+        data:
+          type: answer
+          title: 답변
+          answer: |-
+            {{#tpl.output#}}
+
+            **{{#env.target_lang#}}**
+            {{#llm_translate.text#}}
+
+      - id: count
+        type: custom
+        position: { x: 1560, y: 200 }
+        data:
+          type: assigner
+          title: 처리 건수 +1
+          version: '2'
+          items:
+            - variable_selector: [conversation, digest_count]
+              input_type: constant
+              operation: +=
+              value: 1
